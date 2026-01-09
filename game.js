@@ -353,7 +353,7 @@ export class Game {
         }
 
         // 3. Update Remote Players
-        this.updateRemotePlayers(rippleFn);
+        this.updateRemotePlayers(rippleFn, dt);
 
         // 4. Sync Presence
         this.syncPresence();
@@ -368,7 +368,7 @@ export class Game {
         this.manageFoodSpawning();
     }
     
-    updateRemotePlayers(rippleFn) {
+    updateRemotePlayers(rippleFn, dt) {
         const peers = this.room.peers;
         const presence = this.room.presence;
         
@@ -387,8 +387,8 @@ export class Game {
                 this.remoteSnakes.set(clientId, remoteSnake);
             }
             
-            if (pData && pData.status === 'PLAYING' || pData.status === 'SPAWNING') {
-                 remoteSnake.updateFromData(pData, rippleFn);
+            if (pData && (pData.status === 'PLAYING' || pData.status === 'SPAWNING')) {
+                 remoteSnake.updateFromData(pData, rippleFn, dt);
                  // Handle remote invulnerability visual
                  if (pData.invulnerable) remoteSnake.setInvulnerable(true, this.time);
                  else remoteSnake.setInvulnerable(false);
@@ -442,12 +442,13 @@ export class Game {
         if (count < 5) { // Maintain 5 foods
             const id = Math.random().toString(36).substr(2, 9);
             const pos = getRandomPointOnSphere(this.EARTH_RADIUS);
+            const type = Math.random() < 0.5 ? 'bonus' : 'normal';
             
             this.room.updateRoomState({
                 foods: {
                     [id]: {
                         x: pos.x, y: pos.y, z: pos.z,
-                        type: 'normal'
+                        type: type
                     }
                 }
             });

@@ -227,7 +227,7 @@ export class Snake {
         }
     }
 
-    updateFromData(data, rippleFn) {
+    updateFromData(data, rippleFn, dt = 0) {
         if (!data || !data.head) {
             // Hide if no data (e.g. spectating)
             this.head.visible = false;
@@ -235,9 +235,22 @@ export class Snake {
             return;
         }
 
+        const wasVisible = this.head.visible;
         this.head.visible = true;
-        this.head.position.fromArray(data.head.pos);
-        this.head.quaternion.fromArray(data.head.quat);
+
+        const targetPos = new THREE.Vector3().fromArray(data.head.pos);
+        const targetQuat = new THREE.Quaternion().fromArray(data.head.quat);
+
+        if (!wasVisible || dt === 0 || this.head.position.distanceTo(targetPos) > 5.0) {
+            // Snap if just appearing or far away
+            this.head.position.copy(targetPos);
+            this.head.quaternion.copy(targetQuat);
+        } else {
+            // Smooth lerp
+            const lerpFactor = Math.min(dt * 10, 1.0);
+            this.head.position.lerp(targetPos, lerpFactor);
+            this.head.quaternion.slerp(targetQuat, lerpFactor);
+        }
 
         // Sync segments count
         const targetCount = data.segments ? data.segments.length : 0;
@@ -253,8 +266,18 @@ export class Snake {
         for(let i=0; i<this.segments.length; i++) {
             const segData = data.segments[i];
             if (segData) {
-                this.segments[i].position.fromArray(segData.pos);
-                this.segments[i].quaternion.fromArray(segData.quat);
+                const segTargetPos = new THREE.Vector3().fromArray(segData.pos);
+                const segTargetQuat = new THREE.Quaternion().fromArray(segData.quat);
+
+                if (!wasVisible || dt === 0 || this.segments[i].position.distanceTo(segTargetPos) > 5.0) {
+                    this.segments[i].position.copy(segTargetPos);
+                    this.segments[i].quaternion.copy(segTargetQuat);
+                } else {
+                    const lerpFactor = Math.min(dt * 10, 1.0);
+                    this.segments[i].position.lerp(segTargetPos, lerpFactor);
+                    this.segments[i].quaternion.slerp(segTargetQuat, lerpFactor);
+                }
+
                 if (segData.color) {
                     this.segments[i].material.color.setHex(segData.color);
                 }
@@ -271,9 +294,7 @@ export class Snake {
         
         // Invulnerability visual from data
         if (data.invulnerable) {
-            // Simple visual cue for remote player invulnerability (e.g. transparency or flashing handled by caller)
-             // We'll trust the loop caller to handle blinking using setInvulnerable, 
-             // but here we can at least ensure opacity is handled if needed.
+            // handled externally
         }
     }
 
