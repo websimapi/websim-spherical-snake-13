@@ -268,13 +268,48 @@ export class Snake {
             this.head.position.copy(targetPos);
             this.head.quaternion.copy(targetQuat);
             
-            // Reset history to current position to prevent tail stretching
+            // Rebuild history from remote segment data to prevent bunching
             this.pathHistory = [];
-            for(let i=0; i<100; i++) {
-                this.pathHistory.push({
-                    pos: this.head.position.clone(),
-                    quat: this.head.quaternion.clone()
+            
+            const points = [];
+            points.push({ pos: this.head.position.clone(), quat: this.head.quaternion.clone() });
+            
+            if (data.segments) {
+                data.segments.forEach(s => {
+                    points.push({
+                        pos: new THREE.Vector3().fromArray(s.pos),
+                        quat: new THREE.Quaternion().fromArray(s.quat)
+                    });
                 });
+            }
+
+            // Interpolate to fill history with density for smooth following
+            // If we only have head, just fill with head pos
+            if (points.length === 1) {
+                for(let i=0; i<50; i++) {
+                    this.pathHistory.push({
+                        pos: points[0].pos.clone(),
+                        quat: points[0].quat.clone()
+                    });
+                }
+            } else {
+                for (let i = 0; i < points.length - 1; i++) {
+                    const pA = points[i];
+                    const pB = points[i+1];
+                    const steps = 10; 
+                    for (let j = 0; j < steps; j++) {
+                        const t = j / steps;
+                        this.pathHistory.push({
+                            pos: new THREE.Vector3().lerpVectors(pA.pos, pB.pos, t),
+                            quat: new THREE.Quaternion().slerpQuaternions(pA.quat, pB.quat, t)
+                        });
+                    }
+                }
+                // Ensure tail is covered
+                const last = points[points.length-1];
+                for(let k=0; k<10; k++) {
+                     this.pathHistory.push({ pos: last.pos.clone(), quat: last.quat.clone() });
+                }
             }
         } else {
             // Interpolate Head smoothly

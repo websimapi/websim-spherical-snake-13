@@ -53,7 +53,7 @@ if (muteBtn) {
 
 room.initialize().then(() => {
     game.onRoomInitialized();
-});
+}).catch(console.error);
 
 // Raycaster for interaction
 const raycaster = new THREE.Raycaster();

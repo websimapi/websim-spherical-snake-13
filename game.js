@@ -76,7 +76,8 @@ export class Game {
         if (me) {
             const username = me.username;
             // Find all peers with the same username and sort them by ID to ensure consistent ordering
-            const duplicates = Object.values(this.room.peers)
+            const duplicates = Object.entries(this.room.peers)
+                .map(([id, peer]) => ({ ...peer, id }))
                 .filter(p => p.username === username)
                 .sort((a, b) => a.id.localeCompare(b.id));
             
