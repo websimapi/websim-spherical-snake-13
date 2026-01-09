@@ -20,6 +20,7 @@ export class Game {
         this.time = 0;
         this.invulnerableTimer = 0;
         this.spawnTimer = 0;
+        this.lastSpawnTime = 0;
 
         // Death animation state
         this.dyingTimer = 0;
@@ -68,8 +69,23 @@ export class Game {
     }
 
     onRoomInitialized() {
-        const me = this.room.peers[this.room.clientId];
-        if(me) this.setPlayerInfo(me);
+        const myId = this.room.clientId;
+        let me = this.room.peers[myId];
+
+        // Handle duplicate usernames by appending Guest(x)
+        if (me) {
+            const username = me.username;
+            // Find all peers with the same username and sort them by ID to ensure consistent ordering
+            const duplicates = Object.values(this.room.peers)
+                .filter(p => p.username === username)
+                .sort((a, b) => a.id.localeCompare(b.id));
+            
+            const index = duplicates.findIndex(p => p.id === myId);
+            if (index > 0) {
+                me = { ...me, username: `${username} Guest(${index})` };
+            }
+            this.setPlayerInfo(me);
+        }
         
         // Initial setup for room state if empty (host logic usually, but here optimistic)
         if (!this.room.roomState.foods) {
@@ -520,14 +536,35 @@ export class Game {
         // Simple Host Check: am I the first key in peers?
         const ids = Object.keys(this.room.peers).sort();
         if (ids[0] !== this.room.clientId) return;
+
+        // Throttle spawning
+        if (this.time - this.lastSpawnTime < 0.2) return;
         
         const currentFoods = this.room.roomState.foods || {};
-        const count = Object.keys(currentFoods).length;
+        const activeFoods = Object.values(currentFoods).filter(f => f !== null);
+        const userCount = Object.keys(this.room.peers).length;
         
-        if (count < 5) { // Maintain 5 foods
+        // Count specific types
+        const normalCount = activeFoods.filter(f => f.type !== 'bonus').length;
+        const totalCount = activeFoods.length;
+        
+        // Requirements: 
+        // 1. At least 1 orange (normal) ball per user
+        // 2. Minimum total balls (e.g. 5)
+        const minNormal = Math.max(1, userCount);
+        const minTotal = Math.max(5, userCount);
+        
+        if (normalCount < minNormal || totalCount < minTotal) {
+            this.lastSpawnTime = this.time;
             const id = Math.random().toString(36).substr(2, 9);
             const pos = getRandomPointOnSphere(this.EARTH_RADIUS);
-            const type = Math.random() < 0.5 ? 'bonus' : 'normal';
+            
+            // Prioritize spawning normal if we are below the normal quota
+            let type = 'normal';
+            if (normalCount >= minNormal) {
+                // Quota met, can spawn bonus or normal
+                type = Math.random() < 0.3 ? 'normal' : 'bonus';
+            }
             
             this.room.updateRoomState({
                 foods: {
