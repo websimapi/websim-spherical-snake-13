@@ -87,7 +87,7 @@ export class Snake {
         this.head.add(this.tongue);
     }
 
-    reset() {
+    reset(initialSegments = 5) {
         // Clear segments
         this.segments.forEach(seg => this.scene.remove(seg));
         this.segments = [];
@@ -101,7 +101,7 @@ export class Snake {
         this.currentDir.set(1, 0, 0);
         
         // Rebuild initial body
-        for(let i=0; i<this.STARTING_SEGMENTS; i++) {
+        for(let i=0; i<initialSegments; i++) {
             this.addSegment();
         }
         
@@ -237,19 +237,56 @@ export class Snake {
 
         const wasVisible = this.head.visible;
         this.head.visible = true;
+        
+        // Handle transparency/spawning state visual
+        if (data.status === 'SPAWNING') {
+             this.setOpacity(0.5);
+        } else {
+             this.setOpacity(1.0);
+        }
 
         const targetPos = new THREE.Vector3().fromArray(data.head.pos);
         const targetQuat = new THREE.Quaternion().fromArray(data.head.quat);
+        const dist = this.head.position.distanceTo(targetPos);
+        
+        // Check for snap condition (teleport or first appearance)
+        const isSnap = !wasVisible || dist > 5.0 || this.pathHistory.length === 0;
 
-        if (!wasVisible || dt === 0 || this.head.position.distanceTo(targetPos) > 5.0) {
-            // Snap if just appearing or far away
+        if (isSnap) {
+            // Snap head
             this.head.position.copy(targetPos);
             this.head.quaternion.copy(targetQuat);
+            
+            // Reset history to current position to prevent tail stretching
+            this.pathHistory = [];
+            for(let i=0; i<100; i++) {
+                this.pathHistory.push({
+                    pos: this.head.position.clone(),
+                    quat: this.head.quaternion.clone()
+                });
+            }
         } else {
-            // Smooth lerp
-            const lerpFactor = Math.min(dt * 10, 1.0);
+            // Interpolate Head smoothly
+            const lerpFactor = Math.min(dt * 15, 1.0); // Faster lerp for head responsiveness
             this.head.position.lerp(targetPos, lerpFactor);
             this.head.quaternion.slerp(targetQuat, lerpFactor);
+            
+            // Record History for local trail smoothing
+            // We drive the body with local physics logic based on the interpolated head
+            if (this.pathHistory.length === 0 || 
+                this.pathHistory[0].pos.distanceTo(this.head.position) > 0.05) {
+                
+                this.pathHistory.unshift({
+                    pos: this.head.position.clone(),
+                    quat: this.head.quaternion.clone()
+                });
+                
+                // Prune history
+                const maxHistory = (this.segments.length + 5) * (this.SEGMENT_DISTANCE * 20);
+                if(this.pathHistory.length > maxHistory) {
+                    this.pathHistory.length = Math.floor(maxHistory);
+                }
+            }
         }
 
         // Sync segments count
@@ -262,39 +299,23 @@ export class Snake {
             this.scene.remove(s);
         }
 
-        // Update segments
+        // Sync Colors only (Body position is derived locally for smoothness)
         for(let i=0; i<this.segments.length; i++) {
-            const segData = data.segments[i];
-            if (segData) {
-                const segTargetPos = new THREE.Vector3().fromArray(segData.pos);
-                const segTargetQuat = new THREE.Quaternion().fromArray(segData.quat);
-
-                if (!wasVisible || dt === 0 || this.segments[i].position.distanceTo(segTargetPos) > 5.0) {
-                    this.segments[i].position.copy(segTargetPos);
-                    this.segments[i].quaternion.copy(segTargetQuat);
-                } else {
-                    const lerpFactor = Math.min(dt * 10, 1.0);
-                    this.segments[i].position.lerp(segTargetPos, lerpFactor);
-                    this.segments[i].quaternion.slerp(segTargetQuat, lerpFactor);
-                }
-
-                if (segData.color) {
-                    this.segments[i].material.color.setHex(segData.color);
-                }
+            if (data.segments[i] && data.segments[i].color) {
+                this.segments[i].material.color.setHex(data.segments[i].color);
             }
         }
+        
+        // Update Body Positions using Local History (Inverse Kinematics / Trail)
+        // This makes remote snakes look smooth and connected even if head lerp is imperfect
+        this.updateSegments();
 
-        // Visuals
+        // Visuals (Ripple)
         if (rippleFn) {
             this.applyRippleDisplacement(this.head, rippleFn);
             for(const seg of this.segments) {
                 this.applyRippleDisplacement(seg, rippleFn);
             }
-        }
-        
-        // Invulnerability visual from data
-        if (data.invulnerable) {
-            // handled externally
         }
     }
 

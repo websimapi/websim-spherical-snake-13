@@ -182,7 +182,8 @@ export class Game {
         
         this.status = 'SPAWNING';
         this.score = 0;
-        this.snake.reset();
+        // Start with 0 segments, spawn part by part
+        this.snake.reset(0);
         
         // Random spawn location
         const startPos = getRandomPointOnSphere(this.EARTH_RADIUS);
@@ -272,16 +273,21 @@ export class Game {
             this.invulnerableTimer -= dt;
             this.spawnTimer += dt;
             
-            // "Spawn part by part" - We add segments gradually
-            // Snake starts with 0 segments in reset(), actually it has STARTING_SEGMENTS.
-            // Let's modify visual opacity/scale based on time
+            // "Spawn part by part" - Add segments gradually
+            const targetSegments = 5; 
+            const segmentsPerSec = 5; // fast growth
             
-            if (this.spawnTimer > 1.0) {
+            const expectedCount = Math.floor(this.spawnTimer * segmentsPerSec);
+            while(this.snake.segments.length < Math.min(expectedCount, targetSegments)) {
+                this.snake.addSegment();
+            }
+            
+            if (this.spawnTimer > 1.0 && this.snake.segments.length >= targetSegments) {
                 this.status = 'PLAYING';
                 this.snake.setOpacity(1.0);
             } else {
-                // Fade in
-                this.snake.setOpacity(0.5 + this.spawnTimer * 0.5);
+                // Keep ghostly while spawning
+                this.snake.setOpacity(0.5);
             }
             
             // Logic update
@@ -383,7 +389,9 @@ export class Game {
             let remoteSnake = this.remoteSnakes.get(clientId);
             if (!remoteSnake) {
                 remoteSnake = new Snake(this.scene, this.EARTH_RADIUS);
-                // Differentiate color slightly?
+                // Hide immediately to prevent "default snake" flash before data is applied
+                remoteSnake.head.visible = false;
+                remoteSnake.segments.forEach(s => s.visible = false);
                 this.remoteSnakes.set(clientId, remoteSnake);
             }
             
