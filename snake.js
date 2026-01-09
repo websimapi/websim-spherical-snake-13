@@ -124,6 +124,17 @@ export class Snake {
         this.segments.push(segment);
     }
 
+    removeLastSegment() {
+        if (this.segments.length > 0) {
+            const seg = this.segments.pop();
+            this.scene.remove(seg);
+            if (seg.geometry) seg.geometry.dispose();
+            if (seg.material) seg.material.dispose();
+            return seg.position.clone();
+        }
+        return null;
+    }
+
     // Generate a gradient of segment colors starting from green
     getSegmentColor(index) {
         // Start at Green (approx 0.33) and shift slowly

@@ -15,11 +15,20 @@ export class Game {
         this.EARTH_RADIUS = 10;
         
         // Game State
-        this.status = 'SPECTATING'; // SPECTATING, SPAWNING, PLAYING, DEAD
+        this.status = 'SPECTATING'; // SPECTATING, SPAWNING, PLAYING, DEAD, DYING
         this.score = 0;
         this.time = 0;
         this.invulnerableTimer = 0;
         this.spawnTimer = 0;
+
+        // Death animation state
+        this.dyingTimer = 0;
+        this.foodToDrop = 0;
+        this.droppedCount = 0;
+
+        // Poop mechanic
+        this.poopQueue = 0;
+        this.nextPoopTime = 0;
         
         // Multiplayer State
         this.remoteSnakes = new Map(); // clientId -> Snake instance
@@ -178,10 +187,12 @@ export class Game {
     }
 
     spawnPlayer() {
-        if (this.status === 'PLAYING' || this.status === 'SPAWNING') return;
+        if (this.status === 'PLAYING' || this.status === 'SPAWNING' || this.status === 'DYING') return;
         
         this.status = 'SPAWNING';
         this.score = 0;
+        this.poopQueue = 0;
+        
         // Start with 0 segments, spawn part by part
         this.snake.reset(0);
         
@@ -215,6 +226,8 @@ export class Game {
             this.spawnPlayer();
             return;
         }
+        if (this.status === 'DYING') return;
+        
         if (point) {
             this.targetPoint = point.clone().normalize().multiplyScalar(this.EARTH_RADIUS);
         }
@@ -293,6 +306,40 @@ export class Game {
             // Logic update
             this.snake.update(dt, this.targetPoint, rippleFn);
             
+        } else if (this.status === 'DYING') {
+            // Death Animation: delete body one by one
+            this.dyingTimer += dt;
+            if (this.dyingTimer > 0.1) { 
+                this.dyingTimer = 0;
+                
+                const droppedPos = this.snake.removeLastSegment();
+                if (droppedPos) {
+                    // Drop food
+                    if (this.droppedCount < this.foodToDrop) {
+                        const id = 'bonus-drop-' + Math.random().toString(36).substr(2,9);
+                        this.room.updateRoomState({
+                            foods: {
+                                [id]: {
+                                    x: droppedPos.x, y: droppedPos.y, z: droppedPos.z,
+                                    type: 'bonus'
+                                }
+                            }
+                        });
+                        this.droppedCount++;
+                    }
+                } else {
+                    // No segments left
+                    this.snake.head.visible = false;
+                    this.status = 'DEAD';
+                    
+                    const gameOverEl = document.getElementById('game-over');
+                    gameOverEl.classList.remove('hidden');
+                    gameOverEl.classList.add('visible');
+                }
+            }
+            
+            this.foodManager.sync(this.room.roomState.foods, rippleFn);
+            
         } else if (this.status === 'PLAYING') {
             if (this.invulnerableTimer > 0) {
                 this.invulnerableTimer -= dt;
@@ -312,16 +359,40 @@ export class Game {
             if (eatenIds.length > 0) {
                 const foodsUpdate = {};
                 eatenIds.forEach(id => {
+                    const foodData = this.room.roomState.foods[id];
+                    const isNormal = foodData && foodData.type !== 'bonus';
+
                     foodsUpdate[id] = null; // Mark for deletion
                     this.score++;
                     this.audioManager.play('eat', 0.3);
                     this.snake.addSegment();
                     this.snake.triggerTongue();
+                    
+                    if (isNormal && Math.random() < 0.5) {
+                        this.poopQueue += 5;
+                    }
                 });
                 
                 // Update Room State
                 this.room.updateRoomState({ foods: foodsUpdate });
                 document.getElementById('player-score').innerText = this.score;
+            }
+
+            // Poop Logic
+            if (this.poopQueue > 0 && this.time > this.nextPoopTime) {
+                this.nextPoopTime = this.time + 0.2; 
+                this.poopQueue--;
+                
+                const tailPos = this.snake.getTailPosition();
+                const id = 'bonus-poop-' + Math.random().toString(36).substr(2,9);
+                this.room.updateRoomState({
+                    foods: {
+                        [id]: {
+                            x: tailPos.x, y: tailPos.y, z: tailPos.z,
+                            type: 'bonus'
+                        }
+                    }
+                });
             }
             
             // Check Death (Self or Remote)
@@ -332,16 +403,22 @@ export class Game {
                     // Check remote snakes
                     for (const [id, remoteSnake] of this.remoteSnakes) {
                         const peerData = this.room.presence[id];
-                        if (peerData && peerData.invulnerable) continue; // Don't crash into invulnerable people? Or maybe pass through
+                        if (peerData && peerData.invulnerable) continue; 
                         
-                        // Collision with remote segments
-                        // Simple dist check
+                        // Check Head
+                        if (remoteSnake.head.visible && this.snake.head.position.distanceTo(remoteSnake.head.position) < 1.2) {
+                            this.die();
+                            break;
+                        }
+
+                        // Check segments
                         for(const seg of remoteSnake.segments) {
                              if (this.snake.head.position.distanceTo(seg.position) < 1.0) {
                                  this.die();
                                  break;
                              }
                         }
+                        if (this.status === 'DYING') break;
                     }
                 }
             }
@@ -395,7 +472,7 @@ export class Game {
                 this.remoteSnakes.set(clientId, remoteSnake);
             }
             
-            if (pData && (pData.status === 'PLAYING' || pData.status === 'SPAWNING')) {
+            if (pData && (pData.status === 'PLAYING' || pData.status === 'SPAWNING' || pData.status === 'DYING')) {
                  remoteSnake.updateFromData(pData, rippleFn, dt);
                  // Handle remote invulnerability visual
                  if (pData.invulnerable) remoteSnake.setInvulnerable(true, this.time);
@@ -464,33 +541,15 @@ export class Game {
     }
     
     die() {
-        this.status = 'DEAD';
+        this.status = 'DYING';
         this.audioManager.play('die');
         
-        // Drop Food (1/2 score)
-        const dropCount = Math.floor(this.score / 2);
-        const updates = {};
+        // Drop stats for animation
+        this.foodToDrop = Math.floor(this.score / 2);
+        this.droppedCount = 0;
+        this.dyingTimer = 0;
         
-        for(let i=0; i<dropCount; i++) {
-             const id = 'bonus-' + Math.random().toString(36).substr(2,9);
-             // Scatter around death point
-             const offset = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize().multiplyScalar(2.0);
-             const pos = this.snake.head.position.clone().add(offset).normalize().multiplyScalar(this.EARTH_RADIUS);
-             
-             updates[id] = {
-                 x: pos.x, y: pos.y, z: pos.z,
-                 type: 'bonus'
-             };
-        }
-        
-        if (dropCount > 0) {
-            this.room.updateRoomState({ foods: updates });
-        }
-        
-        // UI
-        const gameOverEl = document.getElementById('game-over');
-        gameOverEl.classList.remove('hidden');
-        gameOverEl.classList.add('visible');
+        this.poopQueue = 0;
     }
 
     updateCamera(dt) {
