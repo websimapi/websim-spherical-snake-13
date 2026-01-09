@@ -44,6 +44,10 @@ export class Game {
         this.init();
     }
 
+    get isGameOver() {
+        return this.status === 'DEAD';
+    }
+
     init() {
         this.audioManager.load('eat', './snake_eat.mp3');
         this.audioManager.load('die', './game_over.mp3');
@@ -210,7 +214,9 @@ export class Game {
             this.spawnPlayer();
             return;
         }
-        this.targetPoint = point.clone().normalize().multiplyScalar(this.EARTH_RADIUS);
+        if (point) {
+            this.targetPoint = point.clone().normalize().multiplyScalar(this.EARTH_RADIUS);
+        }
     }
 
     triggerRipple(point, durationMs) {

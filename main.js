@@ -72,8 +72,13 @@ function handleInput(x, y) {
     if (intersects.length > 0) {
         // Pass the intersection point to the game logic
         game.setTarget(intersects[0].point);
-        
-        // Remove start message on first tap
+    } else if (game.status === 'SPECTATING' || game.isGameOver) {
+        // Allow tapping anywhere to join/respawn if we missed the earth
+        game.setTarget(null);
+    }
+    
+    // Hide start message if we successfully interacted
+    if (intersects.length > 0 || game.status === 'SPECTATING' || game.isGameOver) {
         const msg = document.getElementById('start-message');
         if(msg) msg.style.display = 'none';
     }
@@ -99,16 +104,12 @@ window.addEventListener('resize', () => {
 // Touch events for mobile
 window.addEventListener('touchstart', (e) => {
     interactionStart = Date.now();
-    if (game.isGameOver) {
-        // Handled by click listener on game over modal
-    } else {
-        const touch = e.touches[0];
-        handleInput(touch.clientX, touch.clientY);
-    }
+    const touch = e.touches[0];
+    handleInput(touch.clientX, touch.clientY);
 }, { passive: false });
 
 window.addEventListener('touchend', (e) => {
-    if (!game.isGameOver && e.changedTouches.length > 0) {
+    if (e.changedTouches.length > 0) {
         const touch = e.changedTouches[0];
         const duration = Date.now() - interactionStart;
         handleRippleTrigger(touch.clientX, touch.clientY, duration);
@@ -126,7 +127,7 @@ window.addEventListener('touchmove', (e) => {
 // Mouse events for desktop testing
 window.addEventListener('mousedown', (e) => {
     interactionStart = Date.now();
-    if(!game.isGameOver) handleInput(e.clientX, e.clientY);
+    handleInput(e.clientX, e.clientY);
 });
 window.addEventListener('mouseup', (e) => {
     if(!game.isGameOver) {
@@ -152,9 +153,8 @@ function animate() {
     
     const dt = Math.min(clock.getDelta(), 0.1); // Cap delta time
     
-    if (game.isPlaying) {
-        game.update(dt);
-    }
+    // Always update game state (it handles spectating/playing logic internally)
+    game.update(dt);
     
     renderer.render(scene, camera);
 }
