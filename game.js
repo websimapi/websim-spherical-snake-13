@@ -219,7 +219,7 @@ export class Game {
         }
     }
 
-    triggerRipple(point, durationMs) {
+    triggerRipple(point, durationMs, emit = true) {
         const idx = this.currentRippleIdx;
         this.rippleUniforms.uRippleCenters.value[idx].copy(point);
         this.rippleUniforms.uRippleStartTimes.value[idx] = this.time;
@@ -232,13 +232,14 @@ export class Game {
         this.rippleUniforms.uRippleIntensities.value[idx] = intensity;
         this.currentRippleIdx = (this.currentRippleIdx + 1) % 5;
         
-        // Broadcast ripple? Optional, but nice for multiplayer
-        // We use ephemeral events for this
-        this.room.send({
-            type: 'ripple',
-            center: point.toArray(),
-            duration: durationMs
-        });
+        // Broadcast ripple only if it originated locally
+        if (emit) {
+            this.room.send({
+                type: 'ripple',
+                center: point.toArray(),
+                duration: durationMs
+            });
+        }
     }
 
     update(dt) {
@@ -255,9 +256,14 @@ export class Game {
 
         // 1. Process Remote Messages/Events (Ripples)
         this.room.onmessage = (evt) => {
-            if (evt.data.type === 'ripple' && !evt.data.echo) {
-                 const center = new THREE.Vector3().fromArray(evt.data.center);
-                 this.triggerRipple(center, evt.data.duration);
+            const data = evt.data;
+            if (data.type === 'ripple') {
+                 // Prevent infinite loop: ignore own echoed messages
+                 if (data.clientId === this.room.clientId) return;
+
+                 const center = new THREE.Vector3().fromArray(data.center);
+                 // Do not re-emit remote ripples
+                 this.triggerRipple(center, data.duration, false);
             }
         };
 
